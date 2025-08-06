@@ -101,63 +101,67 @@ function createConnection() {
 }
 
 function watchClipboard() {
+  console.log('👀 Starting clipboard monitoring...');
+  
   setInterval(() => {
-    // Check what formats are available in clipboard
-    const formats = clipboard.availableFormats();
-    
-    // Create a hash of current clipboard state to detect any changes
-    const currentHash = JSON.stringify(formats.sort());
-    
-    if (currentHash !== lastClipboardHash) {
-      lastClipboardHash = currentHash;
-      
-      // Determine what type of content we have
-      let clipboardData = null;
-      let contentType = '';
-      let preview = '';
-      
-      if (clipboard.has('image')) {
-        const image = clipboard.readImage();
-        if (!image.isEmpty()) {
-          contentType = 'image';
-          const size = image.getSize();
-          clipboardData = {
-            type: 'image',
-            data: image.toPNG().toString('base64'),
-            width: size.width,
-            height: size.height
-          };
-          preview = `Image (${size.width}x${size.height})`;
-        }
-      } else if (clipboard.has('text/plain')) {
-        const text = clipboard.readText();
-        if (text && text.length > 0) {
-          contentType = 'text';
-          clipboardData = {
-            type: 'text',
-            data: text
-          };
-          preview = text.length > 50 ? `"${text.substring(0, 50)}..."` : `"${text}"`;
-        }
-      } else if (formats.length > 0) {
-        contentType = 'other';
-        preview = `Unknown format: ${formats.join(', ')}`;
-      }
-      
-      if (clipboardData) {
-        console.log(`📋 Clipboard changed: ${preview}`);
+    try {
+      // Simple text monitoring first
+      const currentText = clipboard.readText();
+      if (currentText !== lastClipboard && currentText.length > 0) {
+        lastClipboard = currentText;
+        
+        const preview = currentText.length > 50 ? `"${currentText.substring(0, 50)}..."` : `"${currentText}"`;
+        console.log(`📋 Text clipboard changed: ${preview}`);
         
         if (ws && ws.readyState === WebSocket.OPEN && isConnected) {
-          console.log(`📤 Sharing ${contentType} with ${roomCode} room...`);
+          console.log(`📤 Sharing text with ${roomCode} room...`);
           ws.send(JSON.stringify({
             type: 'clipboard',
-            content: clipboardData,
+            content: {
+              type: 'text',
+              data: currentText
+            },
             timestamp: Date.now()
           }));
         } else {
-          console.log(`❌ Not connected - ${contentType} not shared`);
+          console.log(`❌ Not connected - text not shared`);
+        }
+        return; // Exit early if we found text
+      }
+      
+      // Check for images only if no text change
+      if (clipboard.has('image')) {
+        const image = clipboard.readImage();
+        if (!image.isEmpty()) {
+          // Create a simple hash to detect image changes
+          const size = image.getSize();
+          const imageHash = `${size.width}x${size.height}`;
+          
+          if (imageHash !== lastClipboardHash) {
+            lastClipboardHash = imageHash;
+            
+            console.log(`📋 Image clipboard changed: ${imageHash}`);
+            
+            if (ws && ws.readyState === WebSocket.OPEN && isConnected) {
+              console.log(`📤 Sharing image with ${roomCode} room...`);
+              ws.send(JSON.stringify({
+                type: 'clipboard',
+                content: {
+                  type: 'image',
+                  data: image.toPNG().toString('base64'),
+                  width: size.width,
+                  height: size.height
+                },
+                timestamp: Date.now()
+              }));
+            } else {
+              console.log(`❌ Not connected - image not shared`);
+            }
+          }
         }
       }
+    } catch (error) {
+      console.error('❌ Clipboard monitoring error:', error);
     }
   }, 1000);
 }
